@@ -4,6 +4,7 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeybo
 import os
 import json
 import logging
+import base64  # Добавил для обработки base64
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -15,9 +16,6 @@ if not TOKEN:
 bot = telebot.TeleBot(TOKEN)
 
 app = Flask(__name__)
-
-# Глобальный set для хранения обработанных update_id (чтобы избежать дубликатов)
-processed_updates = set()
 
 WELCOME_MESSAGE = """
 Доброго времени суток! 
@@ -87,9 +85,8 @@ def handle_menu(message):
         InlineKeyboardButton("👤 Индивидуальная", callback_data=f"session_{location}_individual"),
         InlineKeyboardButton("👥 Парная", callback_data=f"session_{location}_couple")
     )
-    back_markup = get_back_menu()  # Добавляем "Вернуться назад" в reply-кнопки
-    bot.send_message(message.chat.id, text, reply_markup=inline_markup)  # Объединяем текст с inline-кнопками
-    bot.send_message(message.chat.id, "Или вернитесь назад:", reply_markup=back_markup)  # Отдельное сообщение для reply-кнопки (чтобы не перегружать)
+    bot.send_message(message.chat.id, text, reply_markup=inline_markup)  # Текст + inline-кнопки
+    bot.send_message(message.chat.id, ".", reply_markup=get_back_menu())  # Точка, чтобы Telegram показал reply-кнопку без лишнего текста (Telegram игнорирует пустые сообщения)
 
 # Обработчик для кнопки "Контакты"
 @bot.message_handler(func=lambda message: message.text == "Контакты")
@@ -109,7 +106,7 @@ def back(message):
 @bot.callback_query_handler(func=lambda call: call.data.startswith("session_"))
 def handle_session(call):
     logger.info(f"Received session callback: {call.data}")
-    if call.message:  # Проверка, чтобы избежать дубликатов
+    if call.message:  # Проверка на наличие сообщения
         _, location, session_type = call.data.split("_")
         key = f"{location}_{session_type}"
         link = LINKS.get(key, "Ссылка не найдена")
@@ -122,7 +119,7 @@ def handle_session(call):
             message_id=call.message.message_id,
             text=text
         )
-        bot.send_message(call.message.chat.id, "Вернитесь в начало для новых действий:", reply_markup=get_back_to_main_menu())  # Добавляем кнопку "Вернуться в начало" с текстом
+        bot.send_message(call.message.chat.id, ".", reply_markup=get_back_to_main_menu())  # Точка для показа кнопки "Вернуться в начало" без текста
 
 @app.route('/', methods=['GET', 'HEAD'])
 def index():
@@ -132,22 +129,28 @@ def index():
 def webhook():
     logger.info("Received webhook request")
     try:
-        if request.headers.get('content-type') == 'application/json':
-            json_string = request.get_data().decode('utf-8')
-            logger.info(f"JSON string: {json_string}")
-            update_dict = json.loads(json_string)
-            update = telebot.types.Update.de_json(update_dict)
-            if update and update.update_id not in processed_updates:  # Проверка на дубликат
-                processed_updates.add(update.update_id)
-                logger.info(f"Processing new update: {update.update_id}")
-                bot.process_new_updates([update])
-                return '', 200
-            else:
-                logger.warning("Duplicate or invalid update")
-                return '', 200
+        headers = request.headers
+        logger.info(f"Headers: {headers}")  # Лог заголовков
+        content_type = headers.get('content-type')
+        logger.info(f"Content-type: {content_type}")
+        body = request.get_data()
+        logger.info(f"Raw body (bytes): {body}")  # Лог сырых байт
+
+        # Обработка base64, если Vercel закодировал
+        if request.headers.get('X-Vercel-Encoding') == 'base64':
+            body = base64.b64decode(body)
+
+        json_string = body.decode('utf-8')
+        logger.info(f"Decoded JSON string: {json_string}")
+        update_dict = json.loads(json_string)
+        update = telebot.types.Update.de_json(update_dict)
+        if update:
+            logger.info(f"Processing update: {update.update_id}")
+            bot.process_new_updates([update])
+            return '', 200
         else:
-            logger.warning("Invalid content-type")
-            abort(403)
+            logger.warning("No valid update")
+            return '', 200
     except Exception as e:
         logger.error(f"Error in webhook: {str(e)}")
         return '', 500
