@@ -1,8 +1,7 @@
 from flask import Flask, request, abort
 import telebot
-from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
 import os
-import json
 import logging
 
 logging.basicConfig(level=logging.INFO)
@@ -42,20 +41,26 @@ LINKS = {
     "online_couple": "https://2meetup.in/polina-psychologist1/meet30"
 }
 
+# Функция для создания меню внизу (ReplyKeyboardMarkup)
+def get_main_menu():
+    markup = ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
+    markup.add(
+        KeyboardButton("📍 В Лимассоле"),
+        KeyboardButton("💻 Онлайн"),
+        KeyboardButton("Контакты")
+    )
+    return markup
+
 @bot.message_handler(commands=['start'])
 def start(message):
     logger.info(f"Received /start from chat_id: {message.chat.id}")
-    markup = InlineKeyboardMarkup()
-    markup.add(
-        InlineKeyboardButton("📍 В Лимассоле", callback_data="location_limassol"),
-        InlineKeyboardButton("💻 Онлайн", callback_data="location_online")
-    )
-    bot.send_message(message.chat.id, WELCOME_MESSAGE, reply_markup=markup)
+    bot.send_message(message.chat.id, WELCOME_MESSAGE, reply_markup=get_main_menu())
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith("location_"))
-def handle_location(call):
-    logger.info(f"Received location callback: {call.data}")
-    location = call.data.split("_")[1]
+# Обработчик текстовых сообщений от кнопок меню
+@bot.message_handler(func=lambda message: message.text in ["📍 В Лимассоле", "💻 Онлайн"])
+def handle_menu(message):
+    logger.info(f"Received menu choice: {message.text} from chat_id: {message.chat.id}")
+    location = "limassol" if message.text == "📍 В Лимассоле" else "online"
     text = (
         "Вы выбрали личную встречу в Лимассоле.\nКакой формат вам подходит?"
         if location == "limassol"
@@ -66,12 +71,12 @@ def handle_location(call):
         InlineKeyboardButton("👤 Индивидуальная", callback_data=f"session_{location}_individual"),
         InlineKeyboardButton("👥 Парная", callback_data=f"session_{location}_couple")
     )
-    bot.edit_message_text(
-        chat_id=call.message.chat.id,
-        message_id=call.message.message_id,
-        text=text,
-        reply_markup=markup
-    )
+    bot.send_message(message.chat.id, text, reply_markup=markup)
+
+# Обработчик для кнопки "Контакты"
+@bot.message_handler(func=lambda message: message.text == "Контакты")
+def handle_contacts(message):
+    bot.send_message(message.chat.id, "Если у вас срочный вопрос — пишите напрямую в Telegram +357 9689 2912. Отвечаю в течение 24 часов.")
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("session_"))
 def handle_session(call):
@@ -98,7 +103,7 @@ def webhook():
     logger.info("Received webhook request")
     if request.headers.get('content-type') == 'application/json':
         json_string = request.get_data().decode('utf-8')
-        update = telebot.types.Update.de_json(json_string)
+        update = telebot.types.Update.de_json(json.loads(json_string))
         bot.process_new_updates([update])
         return '', 200
     else:
