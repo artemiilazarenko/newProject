@@ -17,7 +17,7 @@ bot = telebot.TeleBot(TOKEN)
 
 app = Flask(__name__)
 
-# Глобальный set для хранения обработанных update_id (чтобы избежать дубликатов)
+# Глобальный set для хранения обработанных update_id
 processed_updates = set()
 
 WELCOME_MESSAGE = """
@@ -82,7 +82,7 @@ def handle_menu(message):
         InlineKeyboardButton("👤 Индивидуальная", callback_data=f"session_{location}_individual"),
         InlineKeyboardButton("👥 Парная", callback_data=f"session_{location}_couple")
     )
-    bot.send_message(message.chat.id, text, reply_markup=inline_markup)  # Только текст + inline-кнопки, без reply
+    bot.send_message(message.chat.id, text, reply_markup=inline_markup)  # Только текст + inline
 
 # Обработчик для кнопки "Контакты"
 @bot.message_handler(func=lambda message: message.text == "Контакты")
@@ -110,7 +110,8 @@ def handle_session(call):
             message_id=call.message.message_id,
             text=text
         )
-        bot.send_message(call.message.chat.id, " ", reply_markup=get_back_to_main_menu())  # Пробел вместо точки, чтобы показать кнопку без видимого текста (Telegram требует текст, но пробел минимален)
+        # Отправляем пустое сообщение с reply_markup (Telegram позволит показать кнопку без текста)
+        bot.send_message(call.message.chat.id, "", reply_markup=get_back_to_main_menu())
 
 @app.route('/', methods=['GET', 'HEAD'])
 def index():
@@ -125,24 +126,28 @@ def webhook():
         content_type = headers.get('content-type')
         logger.info(f"Content-type: {content_type}")
         body = request.get_data()
+        logger.info(f"Raw body length: {len(body)}")
         logger.info(f"Raw body (bytes): {body}")
 
-        # Обработка base64, если нужно
-        if 'base64' in str(headers).lower() or request.headers.get('X-Vercel-Encoding') == 'base64':
+        # Обработка base64, если Vercel закодировал
+        if request.headers.get('X-Vercel-Encoding') == 'base64' or b'base64' in str(body).encode():
+            logger.info("Decoding base64 body")
             body = base64.b64decode(body)
 
         json_string = body.decode('utf-8')
         logger.info(f"Decoded JSON string: {json_string}")
         update_dict = json.loads(json_string)
         update = telebot.types.Update.de_json(update_dict)
-        if update and update.update_id not in processed_updates:
-            processed_updates.add(update.update_id)
+        if update:
             logger.info(f"Processing update: {update.update_id}")
             bot.process_new_updates([update])
             return '', 200
         else:
-            logger.warning("Duplicate or invalid update")
+            logger.warning("No valid update")
             return '', 200
+    except json.JSONDecodeError as json_err:
+        logger.error(f"JSON decode error: {str(json_err)}")
+        return '', 500
     except Exception as e:
         logger.error(f"Error in webhook: {str(e)}")
         return '', 500
