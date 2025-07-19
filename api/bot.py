@@ -4,7 +4,7 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeybo
 import os
 import json
 import logging
-import base64  # Добавил для обработки base64
+import base64
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -16,6 +16,9 @@ if not TOKEN:
 bot = telebot.TeleBot(TOKEN)
 
 app = Flask(__name__)
+
+# Глобальный set для хранения обработанных update_id (чтобы избежать дубликатов)
+processed_updates = set()
 
 WELCOME_MESSAGE = """
 Доброго времени суток! 
@@ -59,12 +62,6 @@ def get_back_to_main_menu():
     markup.add(KeyboardButton("Вернуться в начало"))
     return markup
 
-# Меню с "Вернуться назад"
-def get_back_menu():
-    markup = ReplyKeyboardMarkup(resize_keyboard=True, row_width=1)
-    markup.add(KeyboardButton("Вернуться назад"))
-    return markup
-
 @bot.message_handler(commands=['start'])
 def start(message):
     logger.info(f"Received /start from chat_id: {message.chat.id}")
@@ -85,8 +82,7 @@ def handle_menu(message):
         InlineKeyboardButton("👤 Индивидуальная", callback_data=f"session_{location}_individual"),
         InlineKeyboardButton("👥 Парная", callback_data=f"session_{location}_couple")
     )
-    bot.send_message(message.chat.id, text, reply_markup=inline_markup)  # Текст + inline-кнопки
-    bot.send_message(message.chat.id, ".", reply_markup=get_back_menu())  # Точка, чтобы Telegram показал reply-кнопку без лишнего текста (Telegram игнорирует пустые сообщения)
+    bot.send_message(message.chat.id, text, reply_markup=inline_markup)  # Только текст + inline-кнопки, без reply
 
 # Обработчик для кнопки "Контакты"
 @bot.message_handler(func=lambda message: message.text == "Контакты")
@@ -98,15 +94,10 @@ def handle_contacts(message):
 def back_to_start(message):
     start(message)
 
-# Обработчик для "Вернуться назад"
-@bot.message_handler(func=lambda message: message.text == "Вернуться назад")
-def back(message):
-    bot.send_message(message.chat.id, "Возвращаюсь назад.", reply_markup=get_main_menu())
-
 @bot.callback_query_handler(func=lambda call: call.data.startswith("session_"))
 def handle_session(call):
     logger.info(f"Received session callback: {call.data}")
-    if call.message:  # Проверка на наличие сообщения
+    if call.message:
         _, location, session_type = call.data.split("_")
         key = f"{location}_{session_type}"
         link = LINKS.get(key, "Ссылка не найдена")
@@ -119,7 +110,7 @@ def handle_session(call):
             message_id=call.message.message_id,
             text=text
         )
-        bot.send_message(call.message.chat.id, ".", reply_markup=get_back_to_main_menu())  # Точка для показа кнопки "Вернуться в начало" без текста
+        bot.send_message(call.message.chat.id, " ", reply_markup=get_back_to_main_menu())  # Пробел вместо точки, чтобы показать кнопку без видимого текста (Telegram требует текст, но пробел минимален)
 
 @app.route('/', methods=['GET', 'HEAD'])
 def index():
@@ -130,26 +121,27 @@ def webhook():
     logger.info("Received webhook request")
     try:
         headers = request.headers
-        logger.info(f"Headers: {headers}")  # Лог заголовков
+        logger.info(f"Headers: {headers}")
         content_type = headers.get('content-type')
         logger.info(f"Content-type: {content_type}")
         body = request.get_data()
-        logger.info(f"Raw body (bytes): {body}")  # Лог сырых байт
+        logger.info(f"Raw body (bytes): {body}")
 
-        # Обработка base64, если Vercel закодировал
-        if request.headers.get('X-Vercel-Encoding') == 'base64':
+        # Обработка base64, если нужно
+        if 'base64' in str(headers).lower() or request.headers.get('X-Vercel-Encoding') == 'base64':
             body = base64.b64decode(body)
 
         json_string = body.decode('utf-8')
         logger.info(f"Decoded JSON string: {json_string}")
         update_dict = json.loads(json_string)
         update = telebot.types.Update.de_json(update_dict)
-        if update:
+        if update and update.update_id not in processed_updates:
+            processed_updates.add(update.update_id)
             logger.info(f"Processing update: {update.update_id}")
             bot.process_new_updates([update])
             return '', 200
         else:
-            logger.warning("No valid update")
+            logger.warning("Duplicate or invalid update")
             return '', 200
     except Exception as e:
         logger.error(f"Error in webhook: {str(e)}")
