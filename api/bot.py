@@ -4,7 +4,6 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeybo
 import os
 import json
 import logging
-import base64
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -17,7 +16,7 @@ bot = telebot.TeleBot(TOKEN)
 
 app = Flask(__name__)
 
-# Глобальный set для хранения обработанных update_id (чтобы избежать дубликатов)
+# Глобальный set для хранения обработанных update_id
 processed_updates = set()
 
 WELCOME_MESSAGE = """
@@ -124,31 +123,20 @@ def webhook():
         logger.info(f"Headers: {headers}")
         content_type = headers.get('content-type')
         logger.info(f"Content-type: {content_type}")
-        body = request.get_data()
-        logger.info(f"Raw body length: {len(body) if body else 0}")
-        logger.info(f"Raw body (bytes): {body}")
-
-        if body and len(body) > 0 and content_type == 'application/json':
-            # Очистка JSON
-            json_string = body.decode('utf-8', errors='ignore').replace('\\n', '').replace('\n', '').strip()
-            logger.info(f"Cleaned JSON string: {json_string}")
-            update_dict = json.loads(json_string)
+        update_dict = request.json
+        if update_dict:
+            logger.info(f"Parsed update_dict: {update_dict}")
             update = telebot.types.Update.de_json(update_dict)
             if update and update.update_id not in processed_updates:
                 processed_updates.add(update.update_id)
                 logger.info(f"Processing update: {update.update_id}")
                 bot.process_new_updates([update])
-            else:
-                logger.warning("Duplicate or invalid update")
         else:
-            logger.warning("Empty body or invalid content-type")
-        return '', 200  # Всегда 200, чтобы Telegram не повторял
-    except json.JSONDecodeError as json_err:
-        logger.error(f"JSON decode error: {str(json_err)}")
+            logger.warning("No JSON data in request")
         return '', 200
     except Exception as e:
         logger.error(f"Error in webhook: {str(e)}")
-        return '', 500
+        return '', 200  # Всегда 200 для Telegram
 
 if __name__ == '__main__':
     app.run(debug=True)
