@@ -8,7 +8,7 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Токен бота из BotFather
+# Токен бота из переменной окружения
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 if not TOKEN:
     logger.error("TELEGRAM_TOKEN not set")
@@ -95,20 +95,51 @@ def handle_session(call):
 
 # Vercel serverless функция
 def handler(event, context):
-    logger.info("Received event: %s", event)
+    logger.info(f"Received event: {json.dumps(event)}")
     try:
-        # Проверяем, что body существует и является строкой или словарем
+        # Получаем тело запроса
         body = event.get('body', '')
-        if isinstance(body, str):
-            body = json.loads(body) if body else {}
-        logger.info("Parsed body: %s", body)
+        if not body:
+            logger.warning("Empty body received")
+            return {
+                "statusCode": 400,
+                "body": json.dumps({"error": "Empty body"})
+            }
+
+        # Если тело запроса закодировано в base64 (Vercel иногда так делает)
+        if event.get('isBase64Encoded', False):
+            import base64
+            body = base64.b64decode(body).decode('utf-8')
+
+        # Парсим тело запроса как JSON
+        try:
+            body = json.loads(body) if isinstance(body, str) else body
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse body as JSON: {str(e)}")
+            return {
+                "statusCode": 400,
+                "body": json.dumps({"error": "Invalid JSON"})
+            }
+
+        # Обрабатываем обновление от Telegram
         update = telebot.types.Update.de_json(body)
         if update:
-            logger.info("Processing update: %s", update)
+            logger.info(f"Processing update: {json.dumps(body)}")
             bot.process_new_updates([update])
+            return {
+                "statusCode": 200,
+                "body": json.dumps({"status": "OK"})
+            }
         else:
             logger.warning("No valid update received")
-        return {"statusCode": 200, "body": "OK"}
+            return {
+                "statusCode": 400,
+                "body": json.dumps({"error": "No valid update"})
+            }
+
     except Exception as e:
-        logger.error("Error processing request: %s", str(e))
-        return {"statusCode": 500, "body": str(e)}
+        logger.error(f"Error processing request: {str(e)}", exc_info=True)
+        return {
+            "statusCode": 500,
+            "body": json.dumps({"error": str(e)})
+        }
