@@ -1,11 +1,11 @@
 from flask import Flask, request
-import telebot
-from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
+from aiogram import Bot, Dispatcher, types
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
 import os
 import json
 import logging
+import asyncio
 import base64
-import requests  # Добавил для ручного send
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -13,13 +13,11 @@ logger = logging.getLogger(__name__)
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 if not TOKEN:
     logger.error("TELEGRAM_TOKEN not set")
-    raise ValueError("TELEGRAM_TOKEN environment variable is not set")
-bot = telebot.TeleBot(TOKEN)
+    raise ValueValue("TELEGRAM_TOKEN not set")
+bot = Bot(token=TOKEN)
+dp = Dispatcher()
 
 app = Flask(__name__)
-
-# Глобальный set для хранения обработанных update_id (чтобы избежать дубликатов)
-processed_updates = set()
 
 WELCOME_MESSAGE = """
 Доброго времени суток! 
@@ -47,7 +45,6 @@ LINKS = {
     "online_couple": "https://2meetup.in/polina-psychologist1/meet30"
 }
 
-# Основное меню
 def get_main_menu():
     markup = ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
     markup.add(
@@ -55,32 +52,21 @@ def get_main_menu():
         KeyboardButton("💻 Онлайн"),
         KeyboardButton("Контакты")
     )
-    return markup.to_json()  # Для ручного send
+    return markup
 
-# Меню с "Вернуться в начало"
 def get_back_to_main_menu():
     markup = ReplyKeyboardMarkup(resize_keyboard=True, row_width=1)
     markup.add(KeyboardButton("Вернуться в начало"))
-    return markup.to_json()  # Для ручного send
+    return markup
 
-@bot.message_handler(commands=['start'])
-def start(message):
+@dp.message(commands=['start'])
+async def start(message: types.Message):
     logger.info(f"Received /start from chat_id: {message.chat.id}")
-    try:
-        send_url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-        payload = {
-            "chat_id": message.chat.id,
-            "text": WELCOME_MESSAGE,
-            "reply_markup": get_main_menu()
-        }
-        response = requests.post(send_url, json=payload)
-        logger.info(f"Manual send response for welcome: {response.text}")
-    except Exception as e:
-        logger.error(f"Error sending welcome: {str(e)}")
+    await message.answer(WELCOME_MESSAGE, reply_markup=get_main_menu())
+    logger.info(f"Sent welcome to chat_id: {message.chat.id}")
 
-# Обработчик текстовых сообщений от кнопок меню
-@bot.message_handler(func=lambda message: message.text in ["📍 В Лимассоле", "💻 Онлайн"])
-def handle_menu(message):
+@dp.message(lambda message: message.text in ["📍 В Лимассоле", "💻 Онлайн"])
+async def handle_menu(message: types.Message):
     logger.info(f"Received menu choice: {message.text} from chat_id: {message.chat.id}")
     location = "limassol" if message.text == "📍 В Лимассоле" else "online"
     text = (
@@ -88,103 +74,44 @@ def handle_menu(message):
         if location == "limassol"
         else "Вы выбрали онлайн-консультацию.\nВыберите формат:"
     )
-    inline_markup = InlineKeyboardMarkup()
-    inline_markup.add(
-        InlineKeyboardButton("👤 Индивидуальная", callback_data=f"session_{location}_individual"),
-        InlineKeyboardButton("👥 Парная", callback_data=f"session_{location}_couple")
-    )
-    try:
-        send_url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-        payload = {
-            "chat_id": message.chat.id,
-            "text": text,
-            "reply_markup": inline_markup.to_json()
-        }
-        response = requests.post(send_url, json=payload)
-        logger.info(f"Manual send response for menu: {response.text}")
-    except Exception as e:
-        logger.error(f"Error sending menu: {str(e)}")
+    inline_markup = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton("👤 Индивидуальная", callback_data=f"session_{location}_individual")],
+        [InlineKeyboardButton("👥 Парная", callback_data=f"session_{location}_couple")]
+    ])
+    await message.answer(text, reply_markup=inline_markup)
 
-# Обработчик для кнопки "Контакты"
-@bot.message_handler(func=lambda message: message.text == "Контакты")
-def handle_contacts(message):
-    try:
-        send_url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-        payload = {
-            "chat_id": message.chat.id,
-            "text": "Если у вас срочный вопрос — пишите напрямую в Telegram +357 9689 2912. Отвечаю в течение 24 часов.",
-            "reply_markup": get_back_to_main_menu()
-        }
-        response = requests.post(send_url, json=payload)
-        logger.info(f"Manual send response for contacts: {response.text}")
-    except Exception as e:
-        logger.error(f"Error sending contacts: {str(e)}")
+@dp.message(lambda message: message.text == "Контакты")
+async def handle_contacts(message: types.Message):
+    await message.answer("Если у вас срочный вопрос — пишите напрямую в Telegram +357 9689 2912. Отвечаю в течение 24 часов.", reply_markup=get_back_to_main_menu())
 
-# Обработчик для "Вернуться в начало"
-@bot.message_handler(func=lambda message: message.text == "Вернуться в начало")
-def back_to_start(message):
-    start(message)
+@dp.message(lambda message: message.text == "Вернуться в начало")
+async def back_to_start(message: types.Message):
+    await start(message)
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith("session_"))
-def handle_session(call):
+@dp.callback_query(lambda call: call.data.startswith("session_"))
+async def handle_session(call: types.CallbackQuery):
     logger.info(f"Received session callback: {call.data}")
-    if call.message:
-        _, location, session_type = call.data.split("_")
-        key = f"{location}_{session_type}"
-        link = LINKS.get(key, "Ссылка не найдена")
-        text = (
-            f"Вы выбрали {'индивидуальную встречу в Лимассоле' if key == 'limassol_individual' else 'парную терапию в офисе (Лимассол)' if key == 'limassol_couple' else 'индивидуальную онлайн-сессию' if key == 'online_individual' else 'парную онлайн-сессию'}.\n\n"
-            f"Записаться можно здесь:\n👉 {link}"
-        )
-        try:
-            edit_url = f"https://api.telegram.org/bot{TOKEN}/editMessageText"
-            payload_edit = {
-                "chat_id": call.message.chat.id,
-                "message_id": call.message.message_id,
-                "text": text
-            }
-            response_edit = requests.post(edit_url, json=payload_edit)
-            logger.info(f"Manual edit response: {response_edit.text}")
-
-            send_url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-            payload_send = {
-                "chat_id": call.message.chat.id,
-                "text": " ",
-                "reply_markup": get_back_to_main_menu()
-            }
-            response_send = requests.post(send_url, json=payload_send)
-            logger.info(f"Manual send back menu: {response_send.text}")
-        except Exception as e:
-            logger.error(f"Error handling session: {str(e)}")
+    _, location, session_type = call.data.split("_")
+    key = f"{location}_{session_type}"
+    link = LINKS.get(key, "Ссылка не найдена")
+    text = f"Вы выбрали {'индивидуальную встречу в Лимассоле' if key == 'limassol_individual' else 'парную терапию в офисе (Лимассол)' if key == 'limassol_couple' else 'индивидуальную онлайн-сессию' if key == 'online_individual' else 'парную онлайн-сессию'}.\n\nЗаписаться можно здесь:\n👉 {link}"
+    await call.message.edit_text(text)
+    await call.message.answer(" ", reply_markup=get_back_to_main_menu())
 
 @app.route('/', methods=['GET', 'HEAD'])
 def index():
     return ''
 
 @app.route('/', methods=['POST'])
-def webhook():
+async def webhook():
     logger.info("Received webhook request")
     try:
-        headers = request.headers
-        logger.info(f"Headers: {headers}")
-        content_type = headers.get('content-type')
-        logger.info(f"Content-type: {content_type}")
         body = request.get_data()
-        logger.info(f"Raw body (bytes): {body}")
-
-        if 'base64' in str(headers).lower() or request.headers.get('X-Vercel-Encoding') == 'base64':
+        if request.headers.get('X-Vercel-Encoding') == 'base64':
             body = base64.b64decode(body)
-
         json_string = body.decode('utf-8')
-        logger.info(f"Decoded JSON string: {json_string}")
-        update_dict = json.loads(json_string)
-        update = telebot.types.Update.de_json(update_dict)
-        if update and update.update_id not in processed_updates:
-            processed_updates.add(update.update_id)
-            logger.info(f"Processing update: {update.update_id}")
-            bot.process_new_updates([update])
-        else:
-            logger.warning("Duplicate or invalid update")
+        update = types.Update.de_json(json.loads(json_string))
+        await dp.process_update(update)
     except Exception as e:
         logger.error(f"Error in webhook: {str(e)}")
     return '', 200
