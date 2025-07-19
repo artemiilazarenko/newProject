@@ -1,10 +1,11 @@
-from flask import Flask, request, abort
+from flask import Flask, request
 import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
 import os
 import json
 import logging
 import base64
+import requests  # Добавил для ручного send
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -54,22 +55,28 @@ def get_main_menu():
         KeyboardButton("💻 Онлайн"),
         KeyboardButton("Контакты")
     )
-    return markup
+    return markup.to_json()  # Для ручного send
 
 # Меню с "Вернуться в начало"
 def get_back_to_main_menu():
     markup = ReplyKeyboardMarkup(resize_keyboard=True, row_width=1)
     markup.add(KeyboardButton("Вернуться в начало"))
-    return markup
+    return markup.to_json()  # Для ручного send
 
 @bot.message_handler(commands=['start'])
 def start(message):
     logger.info(f"Received /start from chat_id: {message.chat.id}")
     try:
-        bot.send_message(message.chat.id, WELCOME_MESSAGE, reply_markup=get_main_menu())
-        logger.info(f"Sent welcome message to chat_id: {message.chat.id}")
+        send_url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+        payload = {
+            "chat_id": message.chat.id,
+            "text": WELCOME_MESSAGE,
+            "reply_markup": get_main_menu()
+        }
+        response = requests.post(send_url, json=payload)
+        logger.info(f"Manual send response for welcome: {response.text}")
     except Exception as e:
-        logger.error(f"Error sending welcome message to chat_id {message.chat.id}: {str(e)}")
+        logger.error(f"Error sending welcome: {str(e)}")
 
 # Обработчик текстовых сообщений от кнопок меню
 @bot.message_handler(func=lambda message: message.text in ["📍 В Лимассоле", "💻 Онлайн"])
@@ -87,19 +94,31 @@ def handle_menu(message):
         InlineKeyboardButton("👥 Парная", callback_data=f"session_{location}_couple")
     )
     try:
-        bot.send_message(message.chat.id, text, reply_markup=inline_markup)
-        logger.info(f"Sent menu options to chat_id: {message.chat.id}")
+        send_url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+        payload = {
+            "chat_id": message.chat.id,
+            "text": text,
+            "reply_markup": inline_markup.to_json()
+        }
+        response = requests.post(send_url, json=payload)
+        logger.info(f"Manual send response for menu: {response.text}")
     except Exception as e:
-        logger.error(f"Error sending menu to chat_id {message.chat.id}: {str(e)}")
+        logger.error(f"Error sending menu: {str(e)}")
 
 # Обработчик для кнопки "Контакты"
 @bot.message_handler(func=lambda message: message.text == "Контакты")
 def handle_contacts(message):
     try:
-        bot.send_message(message.chat.id, "Если у вас срочный вопрос — пишите напрямую в Telegram +357 9689 2912. Отвечаю в течение 24 часов.", reply_markup=get_back_to_main_menu())
-        logger.info(f"Sent contacts to chat_id: {message.chat.id}")
+        send_url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+        payload = {
+            "chat_id": message.chat.id,
+            "text": "Если у вас срочный вопрос — пишите напрямую в Telegram +357 9689 2912. Отвечаю в течение 24 часов.",
+            "reply_markup": get_back_to_main_menu()
+        }
+        response = requests.post(send_url, json=payload)
+        logger.info(f"Manual send response for contacts: {response.text}")
     except Exception as e:
-        logger.error(f"Error sending contacts to chat_id {message.chat.id}: {str(e)}")
+        logger.error(f"Error sending contacts: {str(e)}")
 
 # Обработчик для "Вернуться в начало"
 @bot.message_handler(func=lambda message: message.text == "Вернуться в начало")
@@ -118,16 +137,25 @@ def handle_session(call):
             f"Записаться можно здесь:\n👉 {link}"
         )
         try:
-            bot.edit_message_text(
-                chat_id=call.message.chat.id,
-                message_id=call.message.message_id,
-                text=text
-            )
-            logger.info(f"Edited message for session {key} in chat_id: {call.message.chat.id}")
-            bot.send_message(call.message.chat.id, " ", reply_markup=get_back_to_main_menu())
-            logger.info(f"Sent back menu to chat_id: {call.message.chat.id}")
+            edit_url = f"https://api.telegram.org/bot{TOKEN}/editMessageText"
+            payload_edit = {
+                "chat_id": call.message.chat.id,
+                "message_id": call.message.message_id,
+                "text": text
+            }
+            response_edit = requests.post(edit_url, json=payload_edit)
+            logger.info(f"Manual edit response: {response_edit.text}")
+
+            send_url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+            payload_send = {
+                "chat_id": call.message.chat.id,
+                "text": " ",
+                "reply_markup": get_back_to_main_menu()
+            }
+            response_send = requests.post(send_url, json=payload_send)
+            logger.info(f"Manual send back menu: {response_send.text}")
         except Exception as e:
-            logger.error(f"Error handling session callback in chat_id {call.message.chat.id}: {str(e)}")
+            logger.error(f"Error handling session: {str(e)}")
 
 @app.route('/', methods=['GET', 'HEAD'])
 def index():
@@ -144,7 +172,6 @@ def webhook():
         body = request.get_data()
         logger.info(f"Raw body (bytes): {body}")
 
-        # Обработка base64, если нужно
         if 'base64' in str(headers).lower() or request.headers.get('X-Vercel-Encoding') == 'base64':
             body = base64.b64decode(body)
 
@@ -160,7 +187,7 @@ def webhook():
             logger.warning("Duplicate or invalid update")
     except Exception as e:
         logger.error(f"Error in webhook: {str(e)}")
-    return '', 200  # Всегда возвращаем 200
+    return '', 200
 
 if __name__ == '__main__':
     app.run(debug=True)
