@@ -110,8 +110,7 @@ def handle_session(call):
             message_id=call.message.message_id,
             text=text
         )
-        # Отправляем пустое сообщение с reply_markup (Telegram позволит показать кнопку без текста)
-        bot.send_message(call.message.chat.id, "", reply_markup=get_back_to_main_menu())
+        bot.send_message(call.message.chat.id, "", reply_markup=get_back_to_main_menu())  # Пустая строка для кнопки
 
 @app.route('/', methods=['GET', 'HEAD'])
 def index():
@@ -120,30 +119,35 @@ def index():
 @app.route('/', methods=['POST'])
 def webhook():
     logger.info("Received webhook request")
+    headers = request.headers
+    logger.info(f"Headers: {headers}")
+    content_type = headers.get('content-type')
+    logger.info(f"Content-type: {content_type}")
+    body = request.get_data()
+    logger.info(f"Raw body length: {len(body) if body else 0}")
+    logger.info(f"Raw body (bytes): {body}")
+
     try:
-        headers = request.headers
-        logger.info(f"Headers: {headers}")
-        content_type = headers.get('content-type')
-        logger.info(f"Content-type: {content_type}")
-        body = request.get_data()
-        logger.info(f"Raw body length: {len(body)}")
-        logger.info(f"Raw body (bytes): {body}")
+        if body and len(body) > 0 and content_type == 'application/json':
+            # Обработка base64, если нужно
+            if request.headers.get('X-Vercel-Encoding') == 'base64':
+                logger.info("Decoding base64 body")
+                body = base64.b64decode(body)
 
-        # Обработка base64, если Vercel закодировал
-        if request.headers.get('X-Vercel-Encoding') == 'base64' or b'base64' in str(body).encode():
-            logger.info("Decoding base64 body")
-            body = base64.b64decode(body)
-
-        json_string = body.decode('utf-8')
-        logger.info(f"Decoded JSON string: {json_string}")
-        update_dict = json.loads(json_string)
-        update = telebot.types.Update.de_json(update_dict)
-        if update:
-            logger.info(f"Processing update: {update.update_id}")
-            bot.process_new_updates([update])
-            return '', 200
+            json_string = body.decode('utf-8', errors='ignore')  # Ignore errors для кодировки
+            logger.info(f"Decoded JSON string: {json_string}")
+            update_dict = json.loads(json_string)
+            update = telebot.types.Update.de_json(update_dict)
+            if update and update.update_id not in processed_updates:
+                processed_updates.add(update.update_id)
+                logger.info(f"Processing update: {update.update_id}")
+                bot.process_new_updates([update])
+                return '', 200
+            else:
+                logger.warning("Duplicate or invalid update")
+                return '', 200
         else:
-            logger.warning("No valid update")
+            logger.warning("Empty body or invalid content-type")
             return '', 200
     except json.JSONDecodeError as json_err:
         logger.error(f"JSON decode error: {str(json_err)}")
