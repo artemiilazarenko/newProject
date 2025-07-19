@@ -4,6 +4,7 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeybo
 import os
 import json
 import logging
+import base64
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -16,7 +17,7 @@ bot = telebot.TeleBot(TOKEN)
 
 app = Flask(__name__)
 
-# Глобальный set для хранения обработанных update_id
+# Глобальный set для хранения обработанных update_id (чтобы избежать дубликатов)
 processed_updates = set()
 
 WELCOME_MESSAGE = """
@@ -81,7 +82,7 @@ def handle_menu(message):
         InlineKeyboardButton("👤 Индивидуальная", callback_data=f"session_{location}_individual"),
         InlineKeyboardButton("👥 Парная", callback_data=f"session_{location}_couple")
     )
-    bot.send_message(message.chat.id, text, reply_markup=inline_markup)
+    bot.send_message(message.chat.id, text, reply_markup=inline_markup)  # Только текст + inline-кнопки, без reply
 
 # Обработчик для кнопки "Контакты"
 @bot.message_handler(func=lambda message: message.text == "Контакты")
@@ -109,7 +110,7 @@ def handle_session(call):
             message_id=call.message.message_id,
             text=text
         )
-        bot.send_message(call.message.chat.id, "", reply_markup=get_back_to_main_menu())  # Пустая строка для кнопки
+        bot.send_message(call.message.chat.id, " ", reply_markup=get_back_to_main_menu())  # Пробел вместо точки, чтобы показать кнопку без видимого текста (Telegram требует текст, но пробел минимален)
 
 @app.route('/', methods=['GET', 'HEAD'])
 def index():
@@ -123,20 +124,28 @@ def webhook():
         logger.info(f"Headers: {headers}")
         content_type = headers.get('content-type')
         logger.info(f"Content-type: {content_type}")
-        update_dict = request.json
-        if update_dict:
-            logger.info(f"Parsed update_dict: {update_dict}")
-            update = telebot.types.Update.de_json(update_dict)
-            if update and update.update_id not in processed_updates:
-                processed_updates.add(update.update_id)
-                logger.info(f"Processing update: {update.update_id}")
-                bot.process_new_updates([update])
+        body = request.get_data()
+        logger.info(f"Raw body (bytes): {body}")
+
+        # Обработка base64, если нужно
+        if 'base64' in str(headers).lower() or request.headers.get('X-Vercel-Encoding') == 'base64':
+            body = base64.b64decode(body)
+
+        json_string = body.decode('utf-8')
+        logger.info(f"Decoded JSON string: {json_string}")
+        update_dict = json.loads(json_string)
+        update = telebot.types.Update.de_json(update_dict)
+        if update and update.update_id not in processed_updates:
+            processed_updates.add(update.update_id)
+            logger.info(f"Processing update: {update.update_id}")
+            bot.process_new_updates([update])
+            return '', 200
         else:
-            logger.warning("No JSON data in request")
-        return '', 200
+            logger.warning("Duplicate or invalid update")
+            return '', 200
     except Exception as e:
         logger.error(f"Error in webhook: {str(e)}")
-        return '', 200  # Всегда 200 для Telegram
+        return '', 500
 
 if __name__ == '__main__':
     app.run(debug=True)
