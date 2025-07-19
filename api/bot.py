@@ -2,6 +2,7 @@ from flask import Flask, request, abort
 import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
 import os
+import json
 import logging
 
 logging.basicConfig(level=logging.INFO)
@@ -10,7 +11,7 @@ logger = logging.getLogger(__name__)
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 if not TOKEN:
     logger.error("TELEGRAM_TOKEN not set")
-    raise ValueError("TELEGRAM_TOKEN environment variable is not set")
+    raise ValueValue("TELEGRAM_TOKEN environment variable is not set")
 bot = telebot.TeleBot(TOKEN)
 
 app = Flask(__name__)
@@ -41,7 +42,7 @@ LINKS = {
     "online_couple": "https://2meetup.in/polina-psychologist1/meet30"
 }
 
-# Функция для создания меню внизу (ReplyKeyboardMarkup)
+# Основное меню
 def get_main_menu():
     markup = ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
     markup.add(
@@ -49,6 +50,18 @@ def get_main_menu():
         KeyboardButton("💻 Онлайн"),
         KeyboardButton("Контакты")
     )
+    return markup
+
+# Меню с "Вернуться в начало"
+def get_back_to_main_menu():
+    markup = ReplyKeyboardMarkup(resize_keyboard=True, row_width=1)
+    markup.add(KeyboardButton("Вернуться в начало"))
+    return markup
+
+# Меню с "Вернуться назад"
+def get_back_menu():
+    markup = ReplyKeyboardMarkup(resize_keyboard=True, row_width=1)
+    markup.add(KeyboardButton("Вернуться назад"))
     return markup
 
 @bot.message_handler(commands=['start'])
@@ -71,28 +84,42 @@ def handle_menu(message):
         InlineKeyboardButton("👤 Индивидуальная", callback_data=f"session_{location}_individual"),
         InlineKeyboardButton("👥 Парная", callback_data=f"session_{location}_couple")
     )
+    back_markup = get_back_menu()  # Добавляем "Вернуться назад"
     bot.send_message(message.chat.id, text, reply_markup=markup)
+    bot.send_message(message.chat.id, "Выберите формат:", reply_markup=back_markup)
 
 # Обработчик для кнопки "Контакты"
 @bot.message_handler(func=lambda message: message.text == "Контакты")
 def handle_contacts(message):
-    bot.send_message(message.chat.id, "Если у вас срочный вопрос — пишите напрямую в Telegram +357 9689 2912. Отвечаю в течение 24 часов.")
+    bot.send_message(message.chat.id, "Если у вас срочный вопрос — пишите напрямую в Telegram +357 9689 2912. Отвечаю в течение 24 часов.", reply_markup=get_back_to_main_menu())
+
+# Обработчик для "Вернуться в начало"
+@bot.message_handler(func=lambda message: message.text == "Вернуться в начало")
+def back_to_start(message):
+    start(message)
+
+# Обработчик для "Вернуться назад"
+@bot.message_handler(func=lambda message: message.text == "Вернуться назад")
+def back(message):
+    bot.send_message(message.chat.id, "Возвращаюсь назад.", reply_markup=get_main_menu())
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("session_"))
 def handle_session(call):
     logger.info(f"Received session callback: {call.data}")
-    _, location, session_type = call.data.split("_")
-    key = f"{location}_{session_type}"
-    link = LINKS.get(key, "Ссылка не найдена")
-    text = (
-        f"Вы выбрали {'индивидуальную встречу в Лимассоле' if key == 'limassol_individual' else 'парную терапию в офисе (Лимассол)' if key == 'limassol_couple' else 'индивидуальную онлайн-сессию' if key == 'online_individual' else 'парную онлайн-сессию'}.\n\n"
-        f"Записаться можно здесь:\n👉 {link}"
-    )
-    bot.edit_message_text(
-        chat_id=call.message.chat.id,
-        message_id=call.message.message_id,
-        text=text
-    )
+    if call.message:  # Проверка, чтобы избежать дубликатов
+        _, location, session_type = call.data.split("_")
+        key = f"{location}_{session_type}"
+        link = LINKS.get(key, "Ссылка не найдена")
+        text = (
+            f"Вы выбрали {'индивидуальную встречу в Лимассоле' if key == 'limassol_individual' else 'парную терапию в офисе (Лимассол)' if key == 'limassol_couple' else 'индивидуальную онлайн-сессию' if key == 'online_individual' else 'парную онлайн-сессию'}.\n\n"
+            f"Записаться можно здесь:\n👉 {link}"
+        )
+        bot.edit_message_text(
+            chat_id=call.message.chat.id,
+            message_id=call.message.message_id,
+            text=text
+        )
+        bot.send_message(call.message.chat.id, "Что дальше?", reply_markup=get_back_to_main_menu())  # Добавляем "Вернуться в начало"
 
 @app.route('/', methods=['GET', 'HEAD'])
 def index():
@@ -101,13 +128,25 @@ def index():
 @app.route('/', methods=['POST'])
 def webhook():
     logger.info("Received webhook request")
-    if request.headers.get('content-type') == 'application/json':
-        json_string = request.get_data().decode('utf-8')
-        update = telebot.types.Update.de_json(json.loads(json_string))
-        bot.process_new_updates([update])
-        return '', 200
-    else:
-        abort(403)
+    try:
+        if request.headers.get('content-type') == 'application/json':
+            json_string = request.get_data().decode('utf-8')
+            logger.info(f"JSON string: {json_string}")  # Лог для диагностики
+            update_dict = json.loads(json_string)
+            update = telebot.types.Update.de_json(update_dict)
+            if update:
+                logger.info(f"Processing update: {update.update_id}")
+                bot.process_new_updates([update])
+                return '', 200
+            else:
+                logger.warning("No valid update")
+                return '', 200
+        else:
+            logger.warning("Invalid content-type")
+            abort(403)
+    except Exception as e:
+        logger.error(f"Error in webhook: {str(e)}")
+        return '', 500
 
 if __name__ == '__main__':
     app.run(debug=True)
