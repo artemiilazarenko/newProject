@@ -102,7 +102,7 @@ def handle_session(call):
         key = f"{location}_{session_type}"
         link = LINKS.get(key, "Ссылка не найдена")
         text = (
-            f"Вы выбрали {'индивидуальную встречу в Лимассоле' if key == 'limassol_individual' else 'парную терапию в офисе (Лимассол)' if key == 'limassol_couple' else 'индивидуальную онлайн-сессию' if key == 'online_individual' else 'парную онлайн-сессию'}.\n\n"
+            f"Вы выбрали {'индивидуальную встречу в Лимассоле' if key == 'limassol_individual' else 'парную терапию в офисе (Лимассил)' if key == 'limassol_couple' else 'индивидуальную онлайн-сессию' if key == 'online_individual' else 'парную онлайн-сессию'}.\n\n"
             f"Записаться можно здесь:\n👉 {link}"
         )
         bot.edit_message_text(
@@ -145,7 +145,7 @@ def webhook():
             return '', 200
     except Exception as e:
         logger.error(f"Error in webhook: {str(e)}")
-        return '', 500
+        return '', 200  # Всегда возвращаем 200, чтобы Telegram не повторял запросы
 
 if __name__ == '__main__':
     app.run(debug=True)
