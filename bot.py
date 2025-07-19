@@ -3,6 +3,7 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 import os
 import json
 import logging
+import base64
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
@@ -95,8 +96,16 @@ def handle_session(call):
 
 # Vercel serverless функция
 def handler(event, context):
-    logger.info(f"Received event: {json.dumps(event)}")
+    logger.info(f"Received event: {json.dumps(event, ensure_ascii=False)}")
     try:
+        # Проверка метода запроса
+        if event.get('httpMethod') != 'POST':
+            logger.warning(f"Invalid method: {event.get('httpMethod')}")
+            return {
+                "statusCode": 405,
+                "body": json.dumps({"error": "Method not allowed"})
+            }
+
         # Получаем тело запроса
         body = event.get('body', '')
         if not body:
@@ -106,9 +115,8 @@ def handler(event, context):
                 "body": json.dumps({"error": "Empty body"})
             }
 
-        # Если тело запроса закодировано в base64 (Vercel иногда так делает)
+        # Обработка base64, если требуется
         if event.get('isBase64Encoded', False):
-            import base64
             body = base64.b64decode(body).decode('utf-8')
 
         # Парсим тело запроса как JSON
@@ -124,7 +132,7 @@ def handler(event, context):
         # Обрабатываем обновление от Telegram
         update = telebot.types.Update.de_json(body)
         if update:
-            logger.info(f"Processing update: {json.dumps(body)}")
+            logger.info(f"Processing update: {json.dumps(body, ensure_ascii=False)}")
             bot.process_new_updates([update])
             return {
                 "statusCode": 200,
