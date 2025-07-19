@@ -65,7 +65,11 @@ def get_back_to_main_menu():
 @bot.message_handler(commands=['start'])
 def start(message):
     logger.info(f"Received /start from chat_id: {message.chat.id}")
-    bot.send_message(message.chat.id, WELCOME_MESSAGE, reply_markup=get_main_menu())
+    try:
+        bot.send_message(message.chat.id, WELCOME_MESSAGE, reply_markup=get_main_menu())
+        logger.info(f"Sent welcome message to chat_id: {message.chat.id}")
+    except Exception as e:
+        logger.error(f"Error sending welcome message to chat_id {message.chat.id}: {str(e)}")
 
 # Обработчик текстовых сообщений от кнопок меню
 @bot.message_handler(func=lambda message: message.text in ["📍 В Лимассоле", "💻 Онлайн"])
@@ -82,12 +86,20 @@ def handle_menu(message):
         InlineKeyboardButton("👤 Индивидуальная", callback_data=f"session_{location}_individual"),
         InlineKeyboardButton("👥 Парная", callback_data=f"session_{location}_couple")
     )
-    bot.send_message(message.chat.id, text, reply_markup=inline_markup)  # Только текст + inline-кнопки, без reply
+    try:
+        bot.send_message(message.chat.id, text, reply_markup=inline_markup)
+        logger.info(f"Sent menu options to chat_id: {message.chat.id}")
+    except Exception as e:
+        logger.error(f"Error sending menu to chat_id {message.chat.id}: {str(e)}")
 
 # Обработчик для кнопки "Контакты"
 @bot.message_handler(func=lambda message: message.text == "Контакты")
 def handle_contacts(message):
-    bot.send_message(message.chat.id, "Если у вас срочный вопрос — пишите напрямую в Telegram +357 9689 2912. Отвечаю в течение 24 часов.", reply_markup=get_back_to_main_menu())
+    try:
+        bot.send_message(message.chat.id, "Если у вас срочный вопрос — пишите напрямую в Telegram +357 9689 2912. Отвечаю в течение 24 часов.", reply_markup=get_back_to_main_menu())
+        logger.info(f"Sent contacts to chat_id: {message.chat.id}")
+    except Exception as e:
+        logger.error(f"Error sending contacts to chat_id {message.chat.id}: {str(e)}")
 
 # Обработчик для "Вернуться в начало"
 @bot.message_handler(func=lambda message: message.text == "Вернуться в начало")
@@ -102,15 +114,20 @@ def handle_session(call):
         key = f"{location}_{session_type}"
         link = LINKS.get(key, "Ссылка не найдена")
         text = (
-            f"Вы выбрали {'индивидуальную встречу в Лимассоле' if key == 'limassol_individual' else 'парную терапию в офисе (Лимассил)' if key == 'limassol_couple' else 'индивидуальную онлайн-сессию' if key == 'online_individual' else 'парную онлайн-сессию'}.\n\n"
+            f"Вы выбрали {'индивидуальную встречу в Лимассоле' if key == 'limassol_individual' else 'парную терапию в офисе (Лимассол)' if key == 'limassol_couple' else 'индивидуальную онлайн-сессию' if key == 'online_individual' else 'парную онлайн-сессию'}.\n\n"
             f"Записаться можно здесь:\n👉 {link}"
         )
-        bot.edit_message_text(
-            chat_id=call.message.chat.id,
-            message_id=call.message.message_id,
-            text=text
-        )
-        bot.send_message(call.message.chat.id, " ", reply_markup=get_back_to_main_menu())  # Пробел вместо точки, чтобы показать кнопку без видимого текста (Telegram требует текст, но пробел минимален)
+        try:
+            bot.edit_message_text(
+                chat_id=call.message.chat.id,
+                message_id=call.message.message_id,
+                text=text
+            )
+            logger.info(f"Edited message for session {key} in chat_id: {call.message.chat.id}")
+            bot.send_message(call.message.chat.id, " ", reply_markup=get_back_to_main_menu())
+            logger.info(f"Sent back menu to chat_id: {call.message.chat.id}")
+        except Exception as e:
+            logger.error(f"Error handling session callback in chat_id {call.message.chat.id}: {str(e)}")
 
 @app.route('/', methods=['GET', 'HEAD'])
 def index():
@@ -139,13 +156,11 @@ def webhook():
             processed_updates.add(update.update_id)
             logger.info(f"Processing update: {update.update_id}")
             bot.process_new_updates([update])
-            return '', 200
         else:
             logger.warning("Duplicate or invalid update")
-            return '', 200
     except Exception as e:
         logger.error(f"Error in webhook: {str(e)}")
-        return '', 200  # Всегда возвращаем 200, чтобы Telegram не повторял запросы
+    return '', 200  # Всегда возвращаем 200
 
 if __name__ == '__main__':
     app.run(debug=True)
