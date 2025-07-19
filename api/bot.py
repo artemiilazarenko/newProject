@@ -11,10 +11,13 @@ logger = logging.getLogger(__name__)
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 if not TOKEN:
     logger.error("TELEGRAM_TOKEN not set")
-    raise ValueValue("TELEGRAM_TOKEN environment variable is not set")
+    raise ValueError("TELEGRAM_TOKEN environment variable is not set")
 bot = telebot.TeleBot(TOKEN)
 
 app = Flask(__name__)
+
+# Глобальный set для хранения обработанных update_id (чтобы избежать дубликатов)
+processed_updates = set()
 
 WELCOME_MESSAGE = """
 Доброго времени суток! 
@@ -79,14 +82,14 @@ def handle_menu(message):
         if location == "limassol"
         else "Вы выбрали онлайн-консультацию.\nВыберите формат:"
     )
-    markup = InlineKeyboardMarkup()
-    markup.add(
+    inline_markup = InlineKeyboardMarkup()
+    inline_markup.add(
         InlineKeyboardButton("👤 Индивидуальная", callback_data=f"session_{location}_individual"),
         InlineKeyboardButton("👥 Парная", callback_data=f"session_{location}_couple")
     )
-    back_markup = get_back_menu()  # Добавляем "Вернуться назад"
-    bot.send_message(message.chat.id, text, reply_markup=markup)
-    bot.send_message(message.chat.id, "Выберите формат:", reply_markup=back_markup)
+    back_markup = get_back_menu()  # Добавляем "Вернуться назад" в reply-кнопки
+    bot.send_message(message.chat.id, text, reply_markup=inline_markup)  # Объединяем текст с inline-кнопками
+    bot.send_message(message.chat.id, "Или вернитесь назад:", reply_markup=back_markup)  # Отдельное сообщение для reply-кнопки (чтобы не перегружать)
 
 # Обработчик для кнопки "Контакты"
 @bot.message_handler(func=lambda message: message.text == "Контакты")
@@ -119,7 +122,7 @@ def handle_session(call):
             message_id=call.message.message_id,
             text=text
         )
-        bot.send_message(call.message.chat.id, "Что дальше?", reply_markup=get_back_to_main_menu())  # Добавляем "Вернуться в начало"
+        bot.send_message(call.message.chat.id, "Вернитесь в начало для новых действий:", reply_markup=get_back_to_main_menu())  # Добавляем кнопку "Вернуться в начало" с текстом
 
 @app.route('/', methods=['GET', 'HEAD'])
 def index():
@@ -131,15 +134,16 @@ def webhook():
     try:
         if request.headers.get('content-type') == 'application/json':
             json_string = request.get_data().decode('utf-8')
-            logger.info(f"JSON string: {json_string}")  # Лог для диагностики
+            logger.info(f"JSON string: {json_string}")
             update_dict = json.loads(json_string)
             update = telebot.types.Update.de_json(update_dict)
-            if update:
-                logger.info(f"Processing update: {update.update_id}")
+            if update and update.update_id not in processed_updates:  # Проверка на дубликат
+                processed_updates.add(update.update_id)
+                logger.info(f"Processing new update: {update.update_id}")
                 bot.process_new_updates([update])
                 return '', 200
             else:
-                logger.warning("No valid update")
+                logger.warning("Duplicate or invalid update")
                 return '', 200
         else:
             logger.warning("Invalid content-type")
