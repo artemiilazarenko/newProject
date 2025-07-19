@@ -17,7 +17,7 @@ bot = telebot.TeleBot(TOKEN)
 
 app = Flask(__name__)
 
-# Глобальный set для хранения обработанных update_id
+# Глобальный set для хранения обработанных update_id (чтобы избежать дубликатов)
 processed_updates = set()
 
 WELCOME_MESSAGE = """
@@ -119,18 +119,18 @@ def index():
 @app.route('/', methods=['POST'])
 def webhook():
     logger.info("Received webhook request")
-    headers = request.headers
-    logger.info(f"Headers: {headers}")
-    content_type = headers.get('content-type')
-    logger.info(f"Content-type: {content_type}")
-    body = request.get_data()
-    logger.info(f"Raw body length: {len(body) if body else 0}")
-    logger.info(f"Raw body (bytes): {body}")
-
     try:
+        headers = request.headers
+        logger.info(f"Headers: {headers}")
+        content_type = headers.get('content-type')
+        logger.info(f"Content-type: {content_type}")
+        body = request.get_data()
+        logger.info(f"Raw body length: {len(body) if body else 0}")
+        logger.info(f"Raw body (bytes): {body}")
+
         if body and len(body) > 0 and content_type == 'application/json':
-            # Очистка и декод
-            json_string = body.decode('utf-8', errors='ignore').replace('\\n', '').strip()
+            # Очистка JSON
+            json_string = body.decode('utf-8', errors='ignore').replace('\\n', '').replace('\n', '').strip()
             logger.info(f"Cleaned JSON string: {json_string}")
             update_dict = json.loads(json_string)
             update = telebot.types.Update.de_json(update_dict)
@@ -138,16 +138,14 @@ def webhook():
                 processed_updates.add(update.update_id)
                 logger.info(f"Processing update: {update.update_id}")
                 bot.process_new_updates([update])
-                return '', 200
             else:
                 logger.warning("Duplicate or invalid update")
-                return '', 200
         else:
             logger.warning("Empty body or invalid content-type")
-            return '', 200
+        return '', 200  # Всегда 200, чтобы Telegram не повторял
     except json.JSONDecodeError as json_err:
         logger.error(f"JSON decode error: {str(json_err)}")
-        return '', 200  # 200, чтобы Telegram не повторял
+        return '', 200
     except Exception as e:
         logger.error(f"Error in webhook: {str(e)}")
         return '', 500
