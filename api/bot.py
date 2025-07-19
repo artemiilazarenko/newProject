@@ -129,13 +129,9 @@ def webhook():
 
     try:
         if body and len(body) > 0 and content_type == 'application/json':
-            # Обработка base64, если нужно
-            if request.headers.get('X-Vercel-Encoding') == 'base64':
-                logger.info("Decoding base64 body")
-                body = base64.b64decode(body)
-
-            json_string = body.decode('utf-8', errors='ignore')  # Ignore errors для кодировки
-            logger.info(f"Decoded JSON string: {json_string}")
+            # Очистка JSON: убираем \n и лишние пробелы
+            json_string = body.decode('utf-8', errors='ignore').replace('\n', '').strip()
+            logger.info(f"Cleaned JSON string: {json_string}")
             update_dict = json.loads(json_string)
             update = telebot.types.Update.de_json(update_dict)
             if update and update.update_id not in processed_updates:
@@ -151,7 +147,7 @@ def webhook():
             return '', 200
     except json.JSONDecodeError as json_err:
         logger.error(f"JSON decode error: {str(json_err)}")
-        return '', 500
+        return '', 200  # Возвращаем 200, чтобы Telegram не повторял
     except Exception as e:
         logger.error(f"Error in webhook: {str(e)}")
         return '', 500
