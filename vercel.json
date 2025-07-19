@@ -2,7 +2,7 @@
   "version": 2,
   "builds": [
     {
-      "src": "bot.py",
+      "src": "api/bot.py",
       "use": "@vercel/python",
       "config": { "maxLambdaSize": "15mb" }
     }
@@ -11,7 +11,7 @@
     {
       "src": "/(.*)",
       "methods": ["POST"],
-      "dest": "bot.py"
+      "dest": "api/bot.py"
     }
   ]
 }
