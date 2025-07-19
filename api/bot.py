@@ -45,7 +45,7 @@ LINKS = {
 }
 
 # Обработчик команды /start
-@MyBot.message_handler(commands=['start'])
+@bot.message_handler(commands=['start'])
 def start(message):
     logger.info(f"Received /start from chat_id: {message.chat.id}")
     markup = InlineKeyboardMarkup()
@@ -56,7 +56,7 @@ def start(message):
     bot.send_message(message.chat.id, WELCOME_MESSAGE, reply_markup=markup)
 
 # Обработчик выбора локации
-@MyBot.callback_query_handler(func=lambda call: call.data.startswith("location_"))
+@bot.callback_query_handler(func=lambda call: call.data.startswith("location_"))
 def handle_location(call):
     logger.info(f"Received location callback: {call.data}")
     location = call.data.split("_")[1]
@@ -78,7 +78,7 @@ def handle_location(call):
     )
 
 # Обработчик выбора типа сессии
-@MyBot.callback_query_handler(func=lambda call: call.data.startswith("session_"))
+@bot.callback_query_handler(func=lambda call: call.data.startswith("session_"))
 def handle_session(call):
     logger.info(f"Received session callback: {call.data}")
     _, location, session_type = call.data.split("_")
