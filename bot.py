@@ -1,9 +1,18 @@
 import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 import os
+import json
+import logging
+
+# Настройка логирования
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Токен бота из BotFather
 TOKEN = os.getenv("TELEGRAM_TOKEN")
+if not TOKEN:
+    logger.error("TELEGRAM_TOKEN not set")
+    raise ValueError("TELEGRAM_TOKEN environment variable is not set")
 bot = telebot.TeleBot(TOKEN)
 
 # Приветственное сообщение
@@ -37,6 +46,7 @@ LINKS = {
 # Обработчик команды /start
 @bot.message_handler(commands=['start'])
 def start(message):
+    logger.info(f"Received /start from chat_id: {message.chat.id}")
     markup = InlineKeyboardMarkup()
     markup.add(
         InlineKeyboardButton("📍 В Лимассоле", callback_data="location_limassol"),
@@ -47,6 +57,7 @@ def start(message):
 # Обработчик выбора локации
 @bot.callback_query_handler(func=lambda call: call.data.startswith("location_"))
 def handle_location(call):
+    logger.info(f"Received location callback: {call.data}")
     location = call.data.split("_")[1]
     text = (
         "Вы выбрали личную встречу в Лимассоле.\nКакой формат вам подходит?"
@@ -68,6 +79,7 @@ def handle_location(call):
 # Обработчик выбора типа сессии
 @bot.callback_query_handler(func=lambda call: call.data.startswith("session_"))
 def handle_session(call):
+    logger.info(f"Received session callback: {call.data}")
     _, location, session_type = call.data.split("_")
     key = f"{location}_{session_type}"
     link = LINKS.get(key, "Ссылка не найдена")
@@ -81,8 +93,22 @@ def handle_session(call):
         text=text
     )
 
-# Для Vercel: обработчик вебхука
+# Vercel serverless функция
 def handler(event, context):
-    update = telebot.types.Update.de_json(event['body'])
-    bot.process_new_updates([update])
-    return {"statusCode": 200}
+    logger.info("Received event: %s", event)
+    try:
+        # Проверяем, что body существует и является строкой или словарем
+        body = event.get('body', '')
+        if isinstance(body, str):
+            body = json.loads(body) if body else {}
+        logger.info("Parsed body: %s", body)
+        update = telebot.types.Update.de_json(body)
+        if update:
+            logger.info("Processing update: %s", update)
+            bot.process_new_updates([update])
+        else:
+            logger.warning("No valid update received")
+        return {"statusCode": 200, "body": "OK"}
+    except Exception as e:
+        logger.error("Error processing request: %s", str(e))
+        return {"statusCode": 500, "body": str(e)}
